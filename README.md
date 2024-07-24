@@ -1,4 +1,4 @@
-exfat-fuse ([v0.1.0](https://github.com/kusumi/exfat-fuse/releases/tag/v0.1.0))
+exfat-fuse ([v0.2.0](https://github.com/kusumi/exfat-fuse/releases/tag/v0.2.0))
 ========
 
 ## About
@@ -48,11 +48,10 @@ Rust 1.79.0 or newer
                             default is the owner of the current process.
             --gid <value>   Set the group for all files and directories. The
                             default is the group of the current process.
+        -o <options>        relan/exfat compatible file system specific options.
         -d                  Enable env_logger logging and do not daemonize.
         -V, --version       Print version and copyright.
         -h, --help          Print usage.
-            --debug
-            --verbose
 
 ## Bugs
 

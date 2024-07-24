@@ -1,12 +1,20 @@
 use crate::util;
 
-use crate::get_mut_node;
-use crate::get_node;
-use crate::ExfatFuse;
+macro_rules! get_node {
+    ($ef:expr, $nid:expr) => {
+        $ef.get_node($nid).unwrap()
+    };
+}
+
+macro_rules! get_mut_node {
+    ($ef:expr, $nid:expr) => {
+        $ef.get_mut_node($nid).unwrap()
+    };
+}
 
 macro_rules! debug_req {
-    ($req:expr, $debug:expr) => {
-        if $debug {
+    ($req:expr, $cond:expr) => {
+        if $cond {
             log::debug!("{:?}", $req);
         }
     };
@@ -26,13 +34,13 @@ fn stat2attr(st: &libexfat::exfat::ExfatStat) -> fuser::FileAttr {
     attr
 }
 
-impl fuser::Filesystem for ExfatFuse {
+impl fuser::Filesystem for crate::ExfatFuse {
     fn init(
         &mut self,
         req: &fuser::Request<'_>,
         config: &mut fuser::KernelConfig,
     ) -> Result<(), libc::c_int> {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("config {config:?}");
         let _mtx = MTX.lock().unwrap();
         // mark super block as dirty; failure isn't a big deal
@@ -55,7 +63,7 @@ impl fuser::Filesystem for ExfatFuse {
         name: &std::ffi::OsStr,
         reply: fuser::ReplyEntry,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?}");
         let _mtx = MTX.lock().unwrap();
         let Some(name) = name.to_str() else {
@@ -81,7 +89,7 @@ impl fuser::Filesystem for ExfatFuse {
     }
 
     fn getattr(&mut self, req: &fuser::Request<'_>, nid: u64, reply: fuser::ReplyAttr) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid}");
         let _mtx = MTX.lock().unwrap();
         let st = match self.ef.stat(nid) {
@@ -112,8 +120,8 @@ impl fuser::Filesystem for ExfatFuse {
         flags: Option<u32>,
         reply: fuser::ReplyAttr,
     ) {
-        debug_req!(req, self.debug && self.verbose);
-        if self.debug {
+        debug_req!(req, self.debug > 1);
+        if self.debug > 0 {
             let mut s = format!("nid {nid}");
             if let Some(fh) = fh {
                 s = format!("{s} fh {fh}");
@@ -245,7 +253,7 @@ impl fuser::Filesystem for ExfatFuse {
         rdev: u32,
         reply: fuser::ReplyEntry,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?} mode {mode:#o} umask {umask:#o} rdev {rdev}");
         let _mtx = MTX.lock().unwrap();
         let Some(name) = name.to_str() else {
@@ -278,7 +286,7 @@ impl fuser::Filesystem for ExfatFuse {
         umask: u32,
         reply: fuser::ReplyEntry,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?} mode {mode:#o} umask {umask:#o}");
         let _mtx = MTX.lock().unwrap();
         let Some(name) = name.to_str() else {
@@ -309,7 +317,7 @@ impl fuser::Filesystem for ExfatFuse {
         name: &std::ffi::OsStr,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?}");
         let _mtx = MTX.lock().unwrap();
         let Some(name) = name.to_str() else {
@@ -340,7 +348,7 @@ impl fuser::Filesystem for ExfatFuse {
         name: &std::ffi::OsStr,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?}");
         let _mtx = MTX.lock().unwrap();
         let Some(name) = name.to_str() else {
@@ -374,7 +382,7 @@ impl fuser::Filesystem for ExfatFuse {
         flags: u32,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!(
             "old_dnid {old_dnid} old_name {old_name:?} \
             new_dnid {new_dnid} new_name {new_name:?} flags {flags:#x}"
@@ -396,7 +404,7 @@ impl fuser::Filesystem for ExfatFuse {
     }
 
     fn open(&mut self, req: &fuser::Request<'_>, nid: u64, flags: i32, reply: fuser::ReplyOpen) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} flags {flags:#x}");
         let _mtx = MTX.lock().unwrap();
         let Some(node) = self.ef.get_node(nid) else {
@@ -429,7 +437,7 @@ impl fuser::Filesystem for ExfatFuse {
         lock_owner: Option<u64>,
         reply: fuser::ReplyData,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!(
             "nid {nid} fh {fh} offset {offset} size {size} flags {flags:#x} \
             lock_owner {lock_owner:?}"
@@ -459,7 +467,7 @@ impl fuser::Filesystem for ExfatFuse {
         lock_owner: Option<u64>,
         reply: fuser::ReplyWrite,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!(
             "nid {nid} fh {fh} offset {offset} size {} write_flags {write_flags:#x} \
             flags {flags:#x} lock_owner {lock_owner:?}",
@@ -485,7 +493,7 @@ impl fuser::Filesystem for ExfatFuse {
         lock_owner: u64,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} fh {fh} lock_owner {lock_owner:?}");
         let _mtx = MTX.lock().unwrap();
         assert_eq!(nid, fh);
@@ -506,7 +514,7 @@ impl fuser::Filesystem for ExfatFuse {
         flush: bool,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!(
             "nid {nid} fh {fh} flags {flags:#x} flush {flush} \
             lock_owner {lock_owner:?}"
@@ -529,7 +537,7 @@ impl fuser::Filesystem for ExfatFuse {
         datasync: bool,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} fh {fh} datasync {datasync}");
         let _mtx = MTX.lock().unwrap();
         assert_eq!(nid, fh);
@@ -550,7 +558,7 @@ impl fuser::Filesystem for ExfatFuse {
     }
 
     fn opendir(&mut self, req: &fuser::Request<'_>, nid: u64, flags: i32, reply: fuser::ReplyOpen) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} flags {flags:#x}");
         let _mtx = MTX.lock().unwrap();
         let Some(node) = self.ef.get_node(nid) else {
@@ -570,7 +578,7 @@ impl fuser::Filesystem for ExfatFuse {
         offset: i64,
         mut reply: fuser::ReplyDirectory,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} fh {fh} offset {offset}");
         let _mtx = MTX.lock().unwrap();
         assert_eq!(dnid, fh);
@@ -651,7 +659,7 @@ impl fuser::Filesystem for ExfatFuse {
         flags: i32,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} fh {fh} flags {flags:#x}");
         let _mtx = MTX.lock().unwrap();
         assert_eq!(nid, fh);
@@ -667,13 +675,13 @@ impl fuser::Filesystem for ExfatFuse {
         datasync: bool,
         reply: fuser::ReplyEmpty,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} fh {fh} datasync {datasync}");
         self.fsync(req, nid, fh, datasync, reply);
     }
 
     fn statfs(&mut self, req: &fuser::Request<'_>, nid: u64, reply: fuser::ReplyStatfs) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid}");
         let _mtx = MTX.lock().unwrap();
         let sfs = self.ef.statfs();
@@ -692,7 +700,7 @@ impl fuser::Filesystem for ExfatFuse {
     // https://docs.rs/fuser/latest/fuser/trait.Filesystem.html
     // If the default_permissions mount option is given, this method is not called.
     fn access(&mut self, req: &fuser::Request<'_>, nid: u64, mask: i32, reply: fuser::ReplyEmpty) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} mask {mask:#o}");
         let _mtx = MTX.lock().unwrap();
         reply.ok();
@@ -709,7 +717,7 @@ impl fuser::Filesystem for ExfatFuse {
         flags: i32,
         reply: fuser::ReplyCreate,
     ) {
-        debug_req!(req, self.debug && self.verbose);
+        debug_req!(req, self.debug > 1);
         log::debug!(
             "dnid {dnid} name {name:?} mode {mode:#o} umask {umask:#o} \
             flags {flags:#x}"
@@ -735,5 +743,24 @@ impl fuser::Filesystem for ExfatFuse {
             }
         };
         reply.created(&TTL, &stat2attr(&st), 0, nid, 0);
+    }
+
+    fn ioctl(
+        &mut self,
+        req: &fuser::Request<'_>,
+        nid: u64,
+        fh: u64,
+        flags: u32,
+        cmd: u32,
+        in_data: &[u8],
+        out_size: u32,
+        reply: fuser::ReplyIoctl,
+    ) {
+        debug_req!(req, self.debug > 1);
+        log::debug!(
+            "nid {nid} fh {fh} flags {flags:#x} cmd {cmd} in_data {in_data:?} \
+            out_size {out_size}"
+        );
+        reply.error(nix::errno::Errno::EOPNOTSUPP as i32);
     }
 }

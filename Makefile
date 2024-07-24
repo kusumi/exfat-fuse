@@ -1,5 +1,7 @@
 bin:
 	cargo build --release
+bin_bitmap_u64:
+	cargo build --release --features=bitmap_u64
 clean:
 	cargo clean
 fmt:

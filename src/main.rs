@@ -4,48 +4,53 @@ extern crate lazy_static;
 mod fuse;
 mod util;
 
-fn print_version(prog: &str) {
-    util::print_version(prog);
+fn print_version() {
     println!("Copyright (C) 2011-2023  Andrew Nayenko");
     println!("Copyright (C) 2024-  Tomohiro Kusumi");
 }
 
-const EXFAT_FUSE_HOME: &str = "EXFAT_FUSE_HOME";
+const EXFAT_HOME: &str = "EXFAT_HOME";
+const EXFAT_NIDALLOC: &str = "EXFAT_NIDALLOC";
 
 struct ExfatFuse {
     ef: libexfat::exfat::Exfat,
-    debug: bool,
-    verbose: bool,
+    debug: i32,
 }
 
 impl ExfatFuse {
-    fn new(ef: libexfat::exfat::Exfat, debug: bool, verbose: bool) -> Self {
-        Self { ef, debug, verbose }
+    fn new(ef: libexfat::exfat::Exfat, debug: i32) -> Self {
+        Self { ef, debug }
     }
 }
 
-fn init_std_logger(debug: bool) -> Result<(), log::SetLoggerError> {
-    let env =
-        env_logger::Env::default().filter_or("RUST_LOG", if debug { "trace" } else { "info" });
+fn init_std_logger() -> Result<(), log::SetLoggerError> {
+    let env = env_logger::Env::default().filter_or(
+        "RUST_LOG",
+        if util::is_debug_set() {
+            "trace"
+        } else {
+            "info"
+        },
+    );
     env_logger::try_init_from_env(env)
 }
 
-fn init_file_logger(prog: &str, debug: bool) -> Result<(), log::SetLoggerError> {
+fn init_file_logger(prog: &str) -> Result<(), log::SetLoggerError> {
     let home = util::get_home_path();
     let name = format!(".{}.log", util::get_basename(prog));
-    let f = match std::env::var(EXFAT_FUSE_HOME) {
+    let f = match std::env::var(EXFAT_HOME) {
         Ok(v) => {
             if util::is_dir(&v) {
                 util::join_path(&v, &name)
             } else {
-                eprintln!("{EXFAT_FUSE_HOME} not a directory, using {home} instead");
+                eprintln!("{EXFAT_HOME} not a directory, using {home} instead");
                 util::join_path(&home, &name)
             }
         }
         Err(_) => util::join_path(&home, &name),
     };
     simplelog::CombinedLogger::init(vec![simplelog::WriteLogger::new(
-        if debug {
+        if util::is_debug_set() {
             simplelog::LevelFilter::Trace
         } else {
             simplelog::LevelFilter::Info
@@ -138,23 +143,27 @@ fn main() {
         The default is the group of the current process.",
         "<value>",
     );
+    opts.optopt(
+        "o",
+        "",
+        "relan/exfat compatible file system specific options.",
+        "<options>",
+    );
     opts.optflag("d", "", "Enable env_logger logging and do not daemonize.");
     // other options
     opts.optflag("V", "version", "Print version and copyright.");
     opts.optflag("h", "help", "Print usage.");
-    opts.optflag("", "debug", "");
-    opts.optflag("", "verbose", "");
 
     let matches = match opts.parse(&args[1..]) {
         Ok(v) => v,
         Err(e) => {
-            log::error!("{e}");
+            eprintln!("{e}");
             usage(prog, &opts);
             std::process::exit(1);
         }
     };
     if matches.opt_present("V") {
-        print_version(prog);
+        print_version();
         std::process::exit(0);
     }
     if matches.opt_present("help") {
@@ -188,21 +197,10 @@ fn main() {
     if matches.opt_present("auto_unmount") {
         fopts.push(fuser::MountOption::AutoUnmount);
     }
-    if matches.opt_present("ro") {
-        mopts.extend_from_slice(&["--mode", "ro"]);
-    } else {
-        mopts.extend_from_slice(&["--mode", "any"]);
-    }
     if matches.opt_present("noexec") {
         fopts.push(fuser::MountOption::NoExec);
     } else {
         fopts.push(fuser::MountOption::Exec);
-    }
-    if matches.opt_present("noatime") {
-        fopts.push(fuser::MountOption::NoAtime);
-        mopts.push("--noatime");
-    } else {
-        fopts.push(fuser::MountOption::Atime);
     }
     if matches.opt_present("dirsync") {
         fopts.push(fuser::MountOption::DirSync);
@@ -210,6 +208,8 @@ fn main() {
     if matches.opt_present("sync") {
         fopts.push(fuser::MountOption::Sync);
     }
+    let mut ro = matches.opt_present("ro");
+    let mut noatime = matches.opt_present("noatime");
     // options from relan/exfat
     let k = ["--umask", "--dmask", "--fmask", "--uid", "--gid"];
     let mut v = vec![];
@@ -218,26 +218,68 @@ fn main() {
     }
     for (i, s) in k.iter().enumerate() {
         if !v[i].is_empty() {
-            mopts.extend_from_slice(&[s, &v[i]]);
+            mopts.extend_from_slice(&[*s, &v[i]]);
+        }
+    }
+    let options = matches.opt_str("o").unwrap_or_default();
+    let v: Vec<&str> = options.split(',').collect();
+    for x in &v {
+        let mut found = false;
+        let l: Vec<&str> = x.split('=').collect();
+        if l.len() == 1 {
+            if l[0] == "ro" {
+                ro = true;
+                found = true;
+            } else if l[0] == "noatime" {
+                noatime = true;
+                found = true;
+            } else if l[0].is_empty() {
+                found = true; // ignore
+            }
+        } else if l.len() == 2 {
+            for s in &k {
+                if l[0] == &s[2..] {
+                    mopts.extend_from_slice(&[s, l[1]]);
+                    found = true;
+                }
+            }
+        }
+        if !found {
+            eprintln!("invalid option: {x}");
+            std::process::exit(1);
         }
     }
     let nodaemonize = matches.opt_present("d");
-    // other options
-    let debug = matches.opt_present("debug");
-    let verbose = matches.opt_present("verbose");
 
-    if debug {
+    if util::is_debug_set() {
         mopts.push("--debug");
     }
 
+    let nidalloc = std::env::var(EXFAT_NIDALLOC).unwrap_or_default();
+    if !nidalloc.is_empty() {
+        mopts.extend_from_slice(&["--nidalloc", &nidalloc]);
+    }
+
+    if ro {
+        mopts.extend_from_slice(&["--mode", "ro"]);
+    } else {
+        mopts.extend_from_slice(&["--mode", "any"]);
+    }
+    if noatime {
+        fopts.push(fuser::MountOption::NoAtime);
+        mopts.push("--noatime");
+    } else {
+        fopts.push(fuser::MountOption::Atime);
+    }
+
     if nodaemonize {
-        if let Err(e) = init_std_logger(debug) {
-            log::error!("{e}");
+        if let Err(e) = init_std_logger() {
+            eprintln!("{e}");
             std::process::exit(1);
         }
     } else if true {
-        if let Err(e) = init_file_logger(prog, debug) {
-            log::error!("{e}");
+        if let Err(e) = init_file_logger(prog) {
+            eprintln!("{e}");
             std::process::exit(1);
         }
     } else {
@@ -265,7 +307,7 @@ fn main() {
             std::process::exit(1);
         }
     }
-    if let Err(e) = fuser::mount2(ExfatFuse::new(ef, debug, verbose), mntpt, &fopts) {
+    if let Err(e) = fuser::mount2(ExfatFuse::new(ef, util::get_debug_level()), mntpt, &fopts) {
         log::error!("{e}");
         std::process::exit(1);
     }

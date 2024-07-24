@@ -130,9 +130,9 @@ dependencies = [
 
 [[package]]
 name = "env_filter"
-version = "0.1.0"
+version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a009aa4810eb158359dda09d0c87378e4bbb89b5a801f016885a4707ba24f7ea"
+checksum = "c6dc8c8ff84895b051f07a0e65f975cf225131742531338752abfb324e4449ff"
 dependencies = [
  "log",
  "regex",
@@ -140,9 +140,9 @@ dependencies = [
 
 [[package]]
 name = "env_logger"
-version = "0.11.3"
+version = "0.11.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "38b35839ba51819680ba087cd351788c9a3c476841207e0b8cee0b04722343b9"
+checksum = "06676b12debf7bba6903559720abca942d3a66b8acb88815fd2c7c6537e9ade1"
 dependencies = [
  "anstream",
  "anstyle",
@@ -153,7 +153,7 @@ dependencies = [
 
 [[package]]
 name = "exfat-fuse"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "daemonize",
  "env_logger",
@@ -233,8 +233,8 @@ checksum = "97b3888a4aecf77e811145cadf6eef5901f4782c53886191b2f693f24761847c"
 
 [[package]]
 name = "libexfat"
-version = "0.1.0"
-source = "git+https://github.com/kusumi/libexfat#9d3bc61273340ca2ff2dbbb7e5efc6fdb411c2b7"
+version = "0.2.0"
+source = "git+https://github.com/kusumi/libexfat#b69f7672ea655cdf7d537d3fa42a5845f272531b"
 dependencies = [
  "bytemuck",
  "byteorder",
@@ -392,9 +392,9 @@ checksum = "3c5e1a9a646d36c3599cd173a41282daf47c44583ad367b8e6837255952e5c67"
 
 [[package]]
 name = "syn"
-version = "2.0.70"
+version = "2.0.72"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2f0209b68b3613b093e0ec905354eccaedcfe83b8cb37cbdeae64026c3064c16"
+checksum = "dc4b9b9bf2add8093d3f2c0204471e951b2285580335de42f9d2534f3ae7a8af"
 dependencies = [
  "proc-macro2",
  "quote",

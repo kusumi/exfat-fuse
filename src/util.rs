@@ -1,27 +1,3 @@
-#[macro_export]
-macro_rules! get_node {
-    ($ef:expr, $nid:expr) => {
-        $ef.get_node($nid).unwrap()
-    };
-}
-
-#[macro_export]
-macro_rules! get_mut_node {
-    ($ef:expr, $nid:expr) => {
-        $ef.get_mut_node($nid).unwrap()
-    };
-}
-
-pub(crate) fn print_version(prog: &str) {
-    println!(
-        "{} {}.{}.{}",
-        get_basename(prog),
-        libexfat::VERSION[0],
-        libexfat::VERSION[1],
-        libexfat::VERSION[2]
-    );
-}
-
 #[must_use]
 pub(crate) fn get_basename(f: &str) -> String {
     std::path::Path::new(&f)
@@ -90,4 +66,17 @@ pub(crate) fn mode2kind(mode: u32) -> fuser::FileType {
 
 pub(crate) fn unix2system(t: u64) -> std::time::SystemTime {
     std::time::UNIX_EPOCH + std::time::Duration::from_secs(t)
+}
+
+const DEBUG: &str = "DEBUG";
+
+pub(crate) fn get_debug_level() -> i32 {
+    match std::env::var(DEBUG) {
+        Ok(v) => v.parse::<i32>().unwrap_or(-1),
+        Err(_) => -1,
+    }
+}
+
+pub(crate) fn is_debug_set() -> bool {
+    get_debug_level() > 0
 }
