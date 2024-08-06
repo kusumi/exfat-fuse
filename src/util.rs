@@ -72,7 +72,7 @@ const DEBUG: &str = "DEBUG";
 
 pub(crate) fn get_debug_level() -> i32 {
     match std::env::var(DEBUG) {
-        Ok(v) => v.parse::<i32>().unwrap_or(-1),
+        Ok(v) => v.parse().unwrap_or(-1),
         Err(_) => -1,
     }
 }

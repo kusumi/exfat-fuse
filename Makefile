@@ -17,5 +17,9 @@ test:
 	cargo test --release
 test_debug:
 	cargo test --release -- --nocapture
+install:
+	cargo install --path .
+uninstall:
+	cargo uninstall
 
 xxx:	fmt lint test

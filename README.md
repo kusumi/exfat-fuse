@@ -1,4 +1,4 @@
-exfat-fuse ([v0.2.0](https://github.com/kusumi/exfat-fuse/releases/tag/v0.2.0))
+exfat-fuse ([v0.2.1](https://github.com/kusumi/exfat-fuse/releases/tag/v0.2.1))
 ========
 
 ## About
@@ -16,6 +16,14 @@ Rust 1.79.0 or newer
 ## Build
 
     $ make
+
+## Install
+
+    $ make install
+
+## Uninstall
+
+    $ make uninstall
 
 ## Usage
 
