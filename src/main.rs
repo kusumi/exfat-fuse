@@ -65,10 +65,10 @@ fn daemonize() -> Result<(), daemonize::Error> {
     daemonize::Daemonize::new().start()
 }
 
-fn usage(prog: &str, opts: &getopts::Options) {
+fn usage(prog: &str, gopt: &getopts::Options) {
     print!(
         "{}",
-        opts.usage(&format!("Usage: {prog} [options] <device> <directory>"))
+        gopt.usage(&format!("Usage: {prog} [options] <device> <directory>"))
     );
 }
 
@@ -83,21 +83,21 @@ fn main() {
     let args: Vec<String> = std::env::args().collect();
     let prog = &args[0];
 
-    let mut opts = getopts::Options::new();
+    let mut gopt = getopts::Options::new();
     // https://docs.rs/fuser/latest/fuser/enum.MountOption.html
-    opts.optflag(
+    gopt.optflag(
         "",
         "allow_other",
         "Allow all users to access files on this filesystem. \
         By default access is restricted to the user who mounted it.",
     );
-    opts.optflag(
+    gopt.optflag(
         "",
         "allow_root",
         "Allow the root user to access this filesystem, \
         in addition to the user who mounted it.",
     );
-    opts.optflag(
+    gopt.optflag(
         "",
         "auto_unmount",
         "Automatically unmount when the mounting process exits. \
@@ -105,60 +105,60 @@ fn main() {
         If AutoUnmount is set and neither Allow... is set, \
         the FUSE configuration must permit allow_other, otherwise mounting will fail.",
     );
-    opts.optflag("", "ro", "Read-only filesystem");
-    opts.optflag("", "noexec", "Dont allow execution of binaries.");
-    opts.optflag("", "noatime", "Dont update inode access time.");
-    opts.optflag(
+    gopt.optflag("", "ro", "Read-only filesystem");
+    gopt.optflag("", "noexec", "Dont allow execution of binaries.");
+    gopt.optflag("", "noatime", "Dont update inode access time.");
+    gopt.optflag(
         "",
         "dirsync",
         "All modifications to directories will be done synchronously.",
     );
-    opts.optflag("", "sync", "All I/O will be done synchronously.");
+    gopt.optflag("", "sync", "All I/O will be done synchronously.");
     // options from relan/exfat
-    opts.optopt(
+    gopt.optopt(
         "",
         "umask",
         "Set the umask (the bitmask of the permissions that are not present, in octal). \
         The default is 0.",
         "<value>",
     );
-    opts.optopt(
+    gopt.optopt(
         "",
         "dmask",
         "Set the umask for directories only.",
         "<value>",
     );
-    opts.optopt("", "fmask", "Set the umask for files only.", "<value>");
-    opts.optopt(
+    gopt.optopt("", "fmask", "Set the umask for files only.", "<value>");
+    gopt.optopt(
         "",
         "uid",
         "Set the owner for all files and directories. \
         The default is the owner of the current process.",
         "<value>",
     );
-    opts.optopt(
+    gopt.optopt(
         "",
         "gid",
         "Set the group for all files and directories. \
         The default is the group of the current process.",
         "<value>",
     );
-    opts.optopt(
+    gopt.optopt(
         "o",
         "",
         "relan/exfat compatible file system specific options.",
         "<options>",
     );
-    opts.optflag("d", "", "Enable env_logger logging and do not daemonize.");
+    gopt.optflag("d", "", "Enable env_logger logging and do not daemonize.");
     // other options
-    opts.optflag("V", "version", "Print version and copyright.");
-    opts.optflag("h", "help", "Print usage.");
+    gopt.optflag("V", "version", "Print version and copyright.");
+    gopt.optflag("h", "help", "Print usage.");
 
-    let matches = match opts.parse(&args[1..]) {
+    let matches = match gopt.parse(&args[1..]) {
         Ok(v) => v,
         Err(e) => {
             eprintln!("{e}");
-            usage(prog, &opts);
+            usage(prog, &gopt);
             std::process::exit(1);
         }
     };
@@ -167,46 +167,46 @@ fn main() {
         std::process::exit(0);
     }
     if matches.opt_present("help") {
-        usage(prog, &opts);
+        usage(prog, &gopt);
         std::process::exit(0);
     }
 
     let args = &matches.free;
     if args.len() != 2 {
-        usage(prog, &opts);
+        usage(prog, &gopt);
         std::process::exit(1);
     }
     let spec = &args[0];
     let mntpt = &args[1];
 
-    let mut fopts = vec![
+    let mut fopt = vec![
         fuser::MountOption::FSName(spec.clone()),
         fuser::MountOption::Subtype("exfat".to_string()),
         fuser::MountOption::DefaultPermissions,
         fuser::MountOption::NoDev,
         fuser::MountOption::NoSuid,
     ];
-    let mut mopts = vec![];
+    let mut mopt = vec![];
     // https://docs.rs/fuser/latest/fuser/enum.MountOption.html
     if matches.opt_present("allow_other") {
-        fopts.push(fuser::MountOption::AllowOther);
+        fopt.push(fuser::MountOption::AllowOther);
     }
     if matches.opt_present("allow_root") {
-        fopts.push(fuser::MountOption::AllowRoot);
+        fopt.push(fuser::MountOption::AllowRoot);
     }
     if matches.opt_present("auto_unmount") {
-        fopts.push(fuser::MountOption::AutoUnmount);
+        fopt.push(fuser::MountOption::AutoUnmount);
     }
     if matches.opt_present("noexec") {
-        fopts.push(fuser::MountOption::NoExec);
+        fopt.push(fuser::MountOption::NoExec);
     } else {
-        fopts.push(fuser::MountOption::Exec);
+        fopt.push(fuser::MountOption::Exec);
     }
     if matches.opt_present("dirsync") {
-        fopts.push(fuser::MountOption::DirSync);
+        fopt.push(fuser::MountOption::DirSync);
     }
     if matches.opt_present("sync") {
-        fopts.push(fuser::MountOption::Sync);
+        fopt.push(fuser::MountOption::Sync);
     }
     let mut ro = matches.opt_present("ro");
     let mut noatime = matches.opt_present("noatime");
@@ -218,7 +218,7 @@ fn main() {
     }
     for (i, s) in k.iter().enumerate() {
         if !v[i].is_empty() {
-            mopts.extend_from_slice(&[*s, &v[i]]);
+            mopt.extend_from_slice(&[*s, &v[i]]);
         }
     }
     let options = matches.opt_str("o").unwrap_or_default();
@@ -239,7 +239,7 @@ fn main() {
         } else if l.len() == 2 {
             for s in &k {
                 if l[0] == &s[2..] {
-                    mopts.extend_from_slice(&[s, l[1]]);
+                    mopt.extend_from_slice(&[s, l[1]]);
                     found = true;
                 }
             }
@@ -252,24 +252,24 @@ fn main() {
     let nodaemonize = matches.opt_present("d");
 
     if util::is_debug_set() {
-        mopts.push("--debug");
+        mopt.push("--debug");
     }
 
     let nidalloc = std::env::var(EXFAT_NIDALLOC).unwrap_or_default();
     if !nidalloc.is_empty() {
-        mopts.extend_from_slice(&["--nidalloc", &nidalloc]);
+        mopt.extend_from_slice(&["--nidalloc", &nidalloc]);
     }
 
     if ro {
-        mopts.extend_from_slice(&["--mode", "ro"]);
+        mopt.extend_from_slice(&["--mode", "ro"]);
     } else {
-        mopts.extend_from_slice(&["--mode", "any"]);
+        mopt.extend_from_slice(&["--mode", "any"]);
     }
     if noatime {
-        fopts.push(fuser::MountOption::NoAtime);
-        mopts.push("--noatime");
+        fopt.push(fuser::MountOption::NoAtime);
+        mopt.push("--noatime");
     } else {
-        fopts.push(fuser::MountOption::Atime);
+        fopt.push(fuser::MountOption::Atime);
     }
 
     if nodaemonize {
@@ -286,7 +286,7 @@ fn main() {
         unreachable!();
     }
 
-    let ef = match libexfat::mount(spec, &mopts) {
+    let ef = match libexfat::mount(spec, &mopt) {
         Ok(v) => v,
         Err(e) => {
             log::error!("{e}");
@@ -295,11 +295,11 @@ fn main() {
     };
     // fuser option unknown until libexfat mount
     if ef.is_readonly() {
-        fopts.push(fuser::MountOption::RO);
+        fopt.push(fuser::MountOption::RO);
     } else {
-        fopts.push(fuser::MountOption::RW);
+        fopt.push(fuser::MountOption::RW);
     }
-    log::debug!("{fopts:?}");
+    log::debug!("{fopt:?}");
 
     if !nodaemonize {
         if let Err(e) = daemonize() {
@@ -307,7 +307,7 @@ fn main() {
             std::process::exit(1);
         }
     }
-    if let Err(e) = fuser::mount2(ExfatFuse::new(ef, util::get_debug_level()), mntpt, &fopts) {
+    if let Err(e) = fuser::mount2(ExfatFuse::new(ef, util::get_debug_level()), mntpt, &fopt) {
         log::error!("{e}");
         std::process::exit(1);
     }

@@ -6,9 +6,9 @@ macro_rules! get_node {
     };
 }
 
-macro_rules! get_mut_node {
+macro_rules! get_node_mut {
     ($ef:expr, $nid:expr) => {
-        $ef.get_mut_node($nid).unwrap()
+        $ef.get_node_mut($nid).unwrap()
     };
 }
 
@@ -84,7 +84,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
                 return;
             }
         };
-        get_mut_node!(self.ef, nid).put();
+        get_node_mut!(self.ef, nid).put();
         reply.entry(&TTL, &stat2attr(&st), 0);
     }
 
@@ -195,21 +195,21 @@ impl fuser::Filesystem for crate::ExfatFuse {
             }
         }
         if let Some(size) = size {
-            get_mut_node!(self.ef, nid).get();
+            get_node_mut!(self.ef, nid).get();
             if let Err(e) = self.ef.truncate(nid, size, true) {
                 if self.ef.flush_node(nid).is_err() {
                     // ignore this error
                 }
-                get_mut_node!(self.ef, nid).put();
+                get_node_mut!(self.ef, nid).put();
                 reply.error(e as i32);
                 return;
             }
             if let Err(e) = self.ef.flush_node(nid) {
-                get_mut_node!(self.ef, nid).put();
+                get_node_mut!(self.ef, nid).put();
                 reply.error(e as i32);
                 return;
             }
-            get_mut_node!(self.ef, nid).put();
+            get_node_mut!(self.ef, nid).put();
             // truncate has updated mtime
             st = match self.ef.stat(nid) {
                 Ok(v) => v,
@@ -332,7 +332,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             }
         };
         if let Err(e) = self.ef.unlink(nid) {
-            if let Some(node) = self.ef.get_mut_node(nid) {
+            if let Some(node) = self.ef.get_node_mut(nid) {
                 node.put();
             }
             reply.error(e as i32);
@@ -363,7 +363,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             }
         };
         if let Err(e) = self.ef.rmdir(nid) {
-            if let Some(node) = self.ef.get_mut_node(nid) {
+            if let Some(node) = self.ef.get_node_mut(nid) {
                 node.put();
             }
             reply.error(e as i32);
@@ -412,7 +412,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             return;
         };
         assert_eq!(node.get_nid(), nid);
-        get_mut_node!(self.ef, nid).get(); // put on release
+        get_node_mut!(self.ef, nid).get(); // put on release
 
         // https://docs.rs/fuser/latest/fuser/trait.Filesystem.html#method.open
         // says "Open flags (with the exception of O_CREAT, O_EXCL, O_NOCTTY and O_TRUNC)
@@ -525,7 +525,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             reply.error(e as i32);
             return;
         }
-        get_mut_node!(self.ef, nid).put();
+        get_node_mut!(self.ef, nid).put();
         reply.ok();
     }
 
@@ -566,7 +566,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             return;
         };
         assert_eq!(node.get_nid(), nid);
-        get_mut_node!(self.ef, nid).get(); // put on releasedir
+        get_node_mut!(self.ef, nid).get(); // put on releasedir
         reply.opened(nid, 0);
     }
 
@@ -627,7 +627,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
                 let st = match self.ef.stat(nid) {
                     Ok(v) => v,
                     Err(e) => {
-                        get_mut_node!(self.ef, nid).put();
+                        get_node_mut!(self.ef, nid).put();
                         self.ef.closedir_cursor(c);
                         reply.error(e as i32);
                         return;
@@ -639,12 +639,12 @@ impl fuser::Filesystem for crate::ExfatFuse {
                     util::mode2kind(st.st_mode),
                     node.get_name(),
                 ) {
-                    get_mut_node!(self.ef, nid).put();
+                    get_node_mut!(self.ef, nid).put();
                     break;
                 }
                 offset += 1;
             }
-            get_mut_node!(self.ef, nid).put();
+            get_node_mut!(self.ef, nid).put();
             next += 1;
         }
         self.ef.closedir_cursor(c);
@@ -663,7 +663,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         log::debug!("nid {nid} fh {fh} flags {flags:#x}");
         let _mtx = MTX.lock().unwrap();
         assert_eq!(nid, fh);
-        get_mut_node!(self.ef, nid).put();
+        get_node_mut!(self.ef, nid).put();
         reply.ok();
     }
 
@@ -734,7 +734,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
                 return;
             }
         };
-        get_mut_node!(self.ef, nid).get(); // put on release
+        get_node_mut!(self.ef, nid).get(); // put on release
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {

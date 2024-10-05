@@ -3,6 +3,8 @@ bin:
 bin_bitmap_u64:
 	cargo build --release --features=bitmap_u64
 clean:
+	cargo clean --release -p exfat-fuse
+clean_all:
 	cargo clean
 fmt:
 	cargo fmt
