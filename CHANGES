@@ -1,3 +1,9 @@
+v0.3.0
+======
+- Add ioctl(CTL_NIDPRUNE)
+- Add FreeBSD support
+- Misc updates
+
 v0.2.2
 ======
 - Misc updates

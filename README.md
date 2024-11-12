@@ -1,4 +1,4 @@
-exfat-fuse ([v0.2.2](https://github.com/kusumi/exfat-fuse/releases/tag/v0.2.2))
+exfat-fuse ([v0.3.0](https://github.com/kusumi/exfat-fuse/releases/tag/v0.3.0))
 ========
 
 ## About
@@ -7,7 +7,7 @@ Rust version of [https://github.com/relan/exfat/tree/master/fuse](https://github
 
 ## Supported platforms
 
-Linux
+Linux / FreeBSD
 
 ## Requirements
 
@@ -37,17 +37,18 @@ Rust 1.81.0 or newer
                             it.
             --allow_root    Allow the root user to access this filesystem, in
                             addition to the user who mounted it.
+            --ro            Read-only filesystem
+            --noexec        Dont allow execution of binaries.
+            --noatime       Dont update inode access time.
             --auto_unmount  Automatically unmount when the mounting process exits.
                             AutoUnmount requires AllowOther or AllowRoot. If
                             AutoUnmount is set and neither Allow... is set, the
                             FUSE configuration must permit allow_other, otherwise
-                            mounting will fail.
-            --ro            Read-only filesystem
-            --noexec        Dont allow execution of binaries.
-            --noatime       Dont update inode access time.
+                            mounting will fail. Available on Linux.
             --dirsync       All modifications to directories will be done
-                            synchronously.
-            --sync          All I/O will be done synchronously.
+                            synchronously. Available on Linux.
+            --sync          All I/O will be done synchronously. Available on
+                            Linux.
             --umask <value> Set the umask (the bitmask of the permissions that are
                             not present, in octal). The default is 0.
             --dmask <value> Set the umask for directories only.

@@ -54,7 +54,7 @@ pub(crate) fn stat2attr(st: &libexfat::exfat::ExfatStat) -> fuser::FileAttr {
     }
 }
 
-pub(crate) fn mode2kind(mode: u32) -> fuser::FileType {
+pub(crate) fn mode2kind(mode: libexfat::exfat::ExfatStatMode) -> fuser::FileType {
     if (mode & libc::S_IFDIR) != 0 {
         fuser::FileType::Directory
     } else if (mode & libc::S_IFREG) != 0 {

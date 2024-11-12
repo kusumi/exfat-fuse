@@ -14,12 +14,17 @@ const EXFAT_NIDALLOC: &str = "EXFAT_NIDALLOC";
 
 struct ExfatFuse {
     ef: libexfat::exfat::Exfat,
+    total_open: usize,
     debug: i32,
 }
 
 impl ExfatFuse {
     fn new(ef: libexfat::exfat::Exfat, debug: i32) -> Self {
-        Self { ef, debug }
+        Self {
+            ef,
+            total_open: 0,
+            debug,
+        }
     }
 }
 
@@ -35,29 +40,51 @@ fn init_std_logger() -> Result<(), log::SetLoggerError> {
     env_logger::try_init_from_env(env)
 }
 
-fn init_file_logger(prog: &str) -> Result<(), log::SetLoggerError> {
-    let home = util::get_home_path();
+fn init_file_logger(prog: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let dir = util::get_home_path();
     let name = format!(".{}.log", util::get_basename(prog));
     let f = match std::env::var(EXFAT_HOME) {
         Ok(v) => {
             if util::is_dir(&v) {
                 util::join_path(&v, &name)
             } else {
-                eprintln!("{EXFAT_HOME} not a directory, using {home} instead");
-                util::join_path(&home, &name)
+                eprintln!("{EXFAT_HOME} not a directory, using {dir} instead");
+                util::join_path(&dir, &name)
             }
         }
-        Err(_) => util::join_path(&home, &name),
+        Err(_) => return Err(Box::new(nix::errno::Errno::ENOENT)),
     };
-    simplelog::CombinedLogger::init(vec![simplelog::WriteLogger::new(
-        if util::is_debug_set() {
-            simplelog::LevelFilter::Trace
-        } else {
-            simplelog::LevelFilter::Info
-        },
-        simplelog::Config::default(),
-        std::fs::File::create(f).unwrap(),
-    )])
+    Ok(simplelog::CombinedLogger::init(vec![
+        simplelog::WriteLogger::new(
+            if util::is_debug_set() {
+                simplelog::LevelFilter::Trace
+            } else {
+                simplelog::LevelFilter::Info
+            },
+            simplelog::Config::default(),
+            std::fs::File::create(f)?,
+        ),
+    ])?)
+}
+
+fn init_syslog_logger(prog: &str) -> Result<(), Box<dyn std::error::Error>> {
+    let formatter = syslog::Formatter3164 {
+        facility: syslog::Facility::LOG_USER,
+        hostname: None,
+        process: util::get_basename(prog),
+        pid: 0,
+    };
+    let logger = syslog::unix(formatter)?;
+    Ok(
+        log::set_boxed_logger(Box::new(syslog::BasicLogger::new(logger))).map(|()| {
+            log::set_max_level(if util::is_debug_set() {
+                //log::LevelFilter::Trace // XXX not traced
+                log::LevelFilter::Info
+            } else {
+                log::LevelFilter::Info
+            });
+        })?,
+    )
 }
 
 // https://docs.rs/daemonize/latest/daemonize/struct.Daemonize.html
@@ -97,23 +124,33 @@ fn main() {
         "Allow the root user to access this filesystem, \
         in addition to the user who mounted it.",
     );
-    gopt.optflag(
-        "",
-        "auto_unmount",
-        "Automatically unmount when the mounting process exits. \
-        AutoUnmount requires AllowOther or AllowRoot. \
-        If AutoUnmount is set and neither Allow... is set, \
-        the FUSE configuration must permit allow_other, otherwise mounting will fail.",
-    );
     gopt.optflag("", "ro", "Read-only filesystem");
     gopt.optflag("", "noexec", "Dont allow execution of binaries.");
     gopt.optflag("", "noatime", "Dont update inode access time.");
-    gopt.optflag(
-        "",
-        "dirsync",
-        "All modifications to directories will be done synchronously.",
-    );
-    gopt.optflag("", "sync", "All I/O will be done synchronously.");
+    if libexfat::util::is_linux() {
+        gopt.optflag(
+            "",
+            "auto_unmount",
+            "Automatically unmount when the mounting process exits. \
+            AutoUnmount requires AllowOther or AllowRoot. \
+            If AutoUnmount is set and neither Allow... is set, \
+            the FUSE configuration must permit allow_other, \
+            otherwise mounting will fail. \
+            Available on Linux.",
+        );
+        gopt.optflag(
+            "",
+            "dirsync",
+            "All modifications to directories will be done synchronously. \
+            Available on Linux.",
+        );
+        gopt.optflag(
+            "",
+            "sync",
+            "All I/O will be done synchronously. \
+            Available on Linux.",
+        );
+    }
     // options from relan/exfat
     gopt.optopt(
         "",
@@ -183,6 +220,7 @@ fn main() {
         fuser::MountOption::FSName(spec.clone()),
         fuser::MountOption::Subtype("exfat".to_string()),
         fuser::MountOption::DefaultPermissions,
+        #[cfg(target_os = "linux")]
         fuser::MountOption::NoDev,
         fuser::MountOption::NoSuid,
     ];
@@ -194,19 +232,21 @@ fn main() {
     if matches.opt_present("allow_root") {
         fopt.push(fuser::MountOption::AllowRoot);
     }
-    if matches.opt_present("auto_unmount") {
-        fopt.push(fuser::MountOption::AutoUnmount);
-    }
     if matches.opt_present("noexec") {
         fopt.push(fuser::MountOption::NoExec);
     } else {
         fopt.push(fuser::MountOption::Exec);
     }
-    if matches.opt_present("dirsync") {
-        fopt.push(fuser::MountOption::DirSync);
-    }
-    if matches.opt_present("sync") {
-        fopt.push(fuser::MountOption::Sync);
+    if libexfat::util::is_linux() {
+        if matches.opt_present("auto_unmount") {
+            fopt.push(fuser::MountOption::AutoUnmount);
+        }
+        if matches.opt_present("dirsync") {
+            fopt.push(fuser::MountOption::DirSync);
+        }
+        if matches.opt_present("sync") {
+            fopt.push(fuser::MountOption::Sync);
+        }
     }
     let mut ro = matches.opt_present("ro");
     let mut noatime = matches.opt_present("noatime");
@@ -249,7 +289,7 @@ fn main() {
             std::process::exit(1);
         }
     }
-    let nodaemonize = matches.opt_present("d");
+    let use_daemon = !matches.opt_present("d"); // not debug
 
     if util::is_debug_set() {
         mopt.push("--debug");
@@ -272,24 +312,24 @@ fn main() {
         fopt.push(fuser::MountOption::Atime);
     }
 
-    if nodaemonize {
+    if !use_daemon {
         if let Err(e) = init_std_logger() {
             eprintln!("{e}");
             std::process::exit(1);
         }
-    } else if true {
-        if let Err(e) = init_file_logger(prog) {
-            eprintln!("{e}");
-            std::process::exit(1);
+    } else if init_file_logger(prog).is_err() {
+        if let Err(e) = init_syslog_logger(prog) {
+            eprintln!("syslog logger: {e}");
         }
-    } else {
-        unreachable!();
     }
 
     let ef = match libexfat::mount(spec, &mopt) {
         Ok(v) => v,
         Err(e) => {
             log::error!("{e}");
+            if use_daemon {
+                eprintln!("{e}");
+            }
             std::process::exit(1);
         }
     };
@@ -301,12 +341,15 @@ fn main() {
     }
     log::debug!("{fopt:?}");
 
-    if !nodaemonize {
+    if use_daemon {
         if let Err(e) = daemonize() {
             log::error!("{e}");
+            eprintln!("{e}");
             std::process::exit(1);
         }
     }
+    // fuser::mount2 doesn't return, hence after daemonize
+    // XXX use fuser::spawn_mount2
     if let Err(e) = fuser::mount2(ExfatFuse::new(ef, util::get_debug_level()), mntpt, &fopt) {
         log::error!("{e}");
         std::process::exit(1);

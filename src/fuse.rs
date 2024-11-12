@@ -1,5 +1,7 @@
 use crate::util;
 
+use byteorder::ByteOrder;
+
 macro_rules! get_node {
     ($ef:expr, $nid:expr) => {
         $ef.get_node($nid).unwrap()
@@ -53,6 +55,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     fn destroy(&mut self) {
         log::debug!("destroy");
         let _mtx = MTX.lock().unwrap();
+        assert_eq!(self.total_open, 0);
         self.ef.unmount().unwrap();
     }
 
@@ -88,10 +91,19 @@ impl fuser::Filesystem for crate::ExfatFuse {
         reply.entry(&TTL, &stat2attr(&st), 0);
     }
 
-    fn getattr(&mut self, req: &fuser::Request<'_>, nid: u64, reply: fuser::ReplyAttr) {
+    fn getattr(
+        &mut self,
+        req: &fuser::Request<'_>,
+        nid: u64,
+        fh: Option<u64>,
+        reply: fuser::ReplyAttr,
+    ) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid}");
         let _mtx = MTX.lock().unwrap();
+        if let Some(fh) = fh {
+            assert_eq!(nid, fh);
+        }
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
@@ -175,8 +187,12 @@ impl fuser::Filesystem for crate::ExfatFuse {
             }
         };
         if let Some(mode) = mode {
-            let valid_mode_mask =
+            let mode_mask =
                 libc::S_IFREG | libc::S_IFDIR | libc::S_IRWXU | libc::S_IRWXG | libc::S_IRWXO;
+            #[cfg(target_os = "linux")]
+            let valid_mode_mask = mode_mask;
+            #[cfg(not(target_os = "linux"))] // FreeBSD
+            let valid_mode_mask = u32::from(mode_mask);
             if (mode & !valid_mode_mask) != 0 {
                 reply.error(libc::EPERM);
                 return;
@@ -423,6 +439,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
                 return;
             }
         }
+        self.total_open += 1;
         reply.opened(nid, 0);
     }
 
@@ -525,6 +542,8 @@ impl fuser::Filesystem for crate::ExfatFuse {
             reply.error(e as i32);
             return;
         }
+        assert!(self.total_open > 0);
+        self.total_open -= 1;
         get_node_mut!(self.ef, nid).put();
         reply.ok();
     }
@@ -567,6 +586,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         };
         assert_eq!(node.get_nid(), nid);
         get_node_mut!(self.ef, nid).get(); // put on releasedir
+        self.total_open += 1;
         reply.opened(nid, 0);
     }
 
@@ -582,22 +602,25 @@ impl fuser::Filesystem for crate::ExfatFuse {
         log::debug!("dnid {dnid} fh {fh} offset {offset}");
         let _mtx = MTX.lock().unwrap();
         assert_eq!(dnid, fh);
-        let node = get_node!(self.ef, dnid);
-        if !node.is_directory() {
+        let Some(dnode) = self.ef.get_node(dnid) else {
+            reply.error(libc::ENOENT);
+            return;
+        };
+        if !dnode.is_directory() {
             reply.error(libc::ENOTDIR);
             return;
         }
 
         let mut offset = offset;
         if offset < 1 {
-            if reply.add(node.get_nid(), 1, fuser::FileType::Directory, ".") {
+            if reply.add(dnode.get_nid(), 1, fuser::FileType::Directory, ".") {
                 reply.ok();
                 return;
             }
             offset += 1;
         }
         if offset < 2 {
-            if reply.add(node.get_pnid(), 2, fuser::FileType::Directory, "..") {
+            if reply.add(dnode.get_pnid(), 2, fuser::FileType::Directory, "..") {
                 reply.ok();
                 return;
             }
@@ -663,6 +686,8 @@ impl fuser::Filesystem for crate::ExfatFuse {
         log::debug!("nid {nid} fh {fh} flags {flags:#x}");
         let _mtx = MTX.lock().unwrap();
         assert_eq!(nid, fh);
+        assert!(self.total_open > 0);
+        self.total_open -= 1;
         get_node_mut!(self.ef, nid).put();
         reply.ok();
     }
@@ -742,9 +767,11 @@ impl fuser::Filesystem for crate::ExfatFuse {
                 return;
             }
         };
+        self.total_open += 1;
         reply.created(&TTL, &stat2attr(&st), 0, nid, 0);
     }
 
+    // Not supported on FreeBSD (see fuse_vnop_ioctl()).
     fn ioctl(
         &mut self,
         req: &fuser::Request<'_>,
@@ -758,9 +785,33 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!(
-            "nid {nid} fh {fh} flags {flags:#x} cmd {cmd} in_data {in_data:?} \
+            "nid {nid} fh {fh} flags {flags:#x} cmd {cmd:#x} in_data {in_data:?} \
             out_size {out_size}"
         );
-        reply.error(nix::errno::Errno::EOPNOTSUPP as i32);
+        let _mtx = MTX.lock().unwrap();
+        if u64::from(cmd) == libexfat::ctl::EXFAT_CTL_NIDPRUNE_ENCODE {
+            log::debug!("EXFAT_CTL_NIDPRUNE");
+            assert!(self.total_open > 0); // fd for this nid
+            let x = self.total_open - 1;
+            if x > 0 {
+                log::error!("{x} pending open file");
+                reply.error(libc::EBUSY);
+                return;
+            }
+            let t = match self.ef.prune_node(nid) {
+                Ok(v) => v,
+                Err(e) => {
+                    reply.error(e as i32);
+                    return;
+                }
+            };
+            let mut b = [0; 16];
+            byteorder::BigEndian::write_u64_into(&[t.0.try_into().unwrap()], &mut b[..8]);
+            byteorder::BigEndian::write_u64_into(&[t.1.try_into().unwrap()], &mut b[8..]);
+            reply.ioctl(0, &b);
+        } else {
+            log::error!("invalid ioctl command {cmd:#x}");
+            reply.error(libc::EINVAL);
+        }
     }
 }
