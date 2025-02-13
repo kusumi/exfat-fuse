@@ -1,3 +1,4 @@
+# FreeBSD: pkg install autoconf automake pkgconf fuse fusefs-libs3
 bin:
 	cargo build --release
 bin_bitmap_u64:

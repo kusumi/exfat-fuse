@@ -4,6 +4,8 @@ extern crate lazy_static;
 mod fuse;
 mod util;
 
+type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
 fn print_version() {
     println!("Copyright (C) 2011-2023  Andrew Nayenko");
     println!("Copyright (C) 2024-  Tomohiro Kusumi");
@@ -28,7 +30,7 @@ impl ExfatFuse {
     }
 }
 
-fn init_std_logger() -> Result<(), log::SetLoggerError> {
+fn init_std_logger() -> std::result::Result<(), log::SetLoggerError> {
     let env = env_logger::Env::default().filter_or(
         "RUST_LOG",
         if util::is_debug_set() {
@@ -40,16 +42,22 @@ fn init_std_logger() -> Result<(), log::SetLoggerError> {
     env_logger::try_init_from_env(env)
 }
 
-fn init_file_logger(prog: &str) -> Result<(), Box<dyn std::error::Error>> {
-    let dir = util::get_home_path();
-    let name = format!(".{}.log", util::get_basename(prog));
+fn init_file_logger(prog: &str) -> Result<()> {
+    let dir = util::get_home_path()?;
+    let name = format!(
+        ".{}.log",
+        match util::get_basename(prog) {
+            Some(v) => v,
+            None => "exfat-fuse".to_string(),
+        }
+    );
     let f = match std::env::var(EXFAT_HOME) {
         Ok(v) => {
             if util::is_dir(&v) {
-                util::join_path(&v, &name)
+                util::join_path(&v, &name)?
             } else {
                 eprintln!("{EXFAT_HOME} not a directory, using {dir} instead");
-                util::join_path(&dir, &name)
+                util::join_path(&dir, &name)?
             }
         }
         Err(_) => return Err(Box::new(nix::errno::Errno::ENOENT)),
@@ -67,11 +75,14 @@ fn init_file_logger(prog: &str) -> Result<(), Box<dyn std::error::Error>> {
     ])?)
 }
 
-fn init_syslog_logger(prog: &str) -> Result<(), Box<dyn std::error::Error>> {
+fn init_syslog_logger(prog: &str) -> Result<()> {
     let formatter = syslog::Formatter3164 {
         facility: syslog::Facility::LOG_USER,
         hostname: None,
-        process: util::get_basename(prog),
+        process: match util::get_basename(prog) {
+            Some(v) => v,
+            None => "exfat-fuse".to_string(),
+        },
         pid: 0,
     };
     let logger = syslog::unix(formatter)?;
@@ -87,11 +98,6 @@ fn init_syslog_logger(prog: &str) -> Result<(), Box<dyn std::error::Error>> {
     )
 }
 
-// https://docs.rs/daemonize/latest/daemonize/struct.Daemonize.html
-fn daemonize() -> Result<(), daemonize::Error> {
-    daemonize::Daemonize::new().start()
-}
-
 fn usage(prog: &str, gopt: &getopts::Options) {
     print!(
         "{}",
@@ -99,6 +105,7 @@ fn usage(prog: &str, gopt: &getopts::Options) {
     );
 }
 
+#[allow(clippy::too_many_lines)]
 fn main() {
     println!(
         "FUSE exfat {}.{}.{} (fuser)",
@@ -262,10 +269,9 @@ fn main() {
         }
     }
     let options = matches.opt_str("o").unwrap_or_default();
-    let v: Vec<&str> = options.split(',').collect();
-    for x in &v {
+    for x in &options.split(',').collect::<Vec<&str>>() {
         let mut found = false;
-        let l: Vec<&str> = x.split('=').collect();
+        let l = x.split('=').collect::<Vec<&str>>();
         if l.len() == 1 {
             if l[0] == "ro" {
                 ro = true;
@@ -342,7 +348,8 @@ fn main() {
     log::debug!("{fopt:?}");
 
     if use_daemon {
-        if let Err(e) = daemonize() {
+        // https://docs.rs/daemonize/latest/daemonize/struct.Daemonize.html
+        if let Err(e) = daemonize::Daemonize::new().start() {
             log::error!("{e}");
             eprintln!("{e}");
             std::process::exit(1);

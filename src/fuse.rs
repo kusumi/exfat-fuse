@@ -1,5 +1,3 @@
-use crate::util;
-
 use byteorder::ByteOrder;
 
 macro_rules! get_node {
@@ -28,12 +26,29 @@ lazy_static! {
     static ref MTX: std::sync::Mutex<i32> = std::sync::Mutex::new(0);
 }
 
+macro_rules! mtx_lock {
+    ($mtx:expr) => {
+        $mtx.lock().unwrap()
+    };
+}
+
 const TTL: std::time::Duration = std::time::Duration::from_secs(1);
 
-fn stat2attr(st: &libexfat::exfat::ExfatStat) -> fuser::FileAttr {
-    let attr = util::stat2attr(st);
+fn stat2attr(st: &libexfat::exfat::Stat) -> fuser::FileAttr {
+    let attr = crate::util::stat2attr(st);
     log::debug!("{attr:?}");
     attr
+}
+
+#[allow(clippy::needless_pass_by_value)]
+fn e2i(e: libexfat::Error) -> i32 {
+    (match e {
+        libexfat::Error::Errno(e) => e,
+        libexfat::Error::Error(e) => match crate::util::error2errno(&e) {
+            Some(v) => v,
+            None => nix::errno::Errno::EINVAL,
+        },
+    }) as i32
 }
 
 impl fuser::Filesystem for crate::ExfatFuse {
@@ -44,17 +59,17 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) -> Result<(), libc::c_int> {
         debug_req!(req, self.debug > 1);
         log::debug!("config {config:?}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         // mark super block as dirty; failure isn't a big deal
         if let Err(e) = self.ef.soil_super_block() {
-            return Err(e as i32);
+            return Err(e2i(e));
         }
         Ok(())
     }
 
     fn destroy(&mut self) {
         log::debug!("destroy");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(self.total_open, 0);
         self.ef.unmount().unwrap();
     }
@@ -68,7 +83,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(name) = name.to_str() else {
             reply.error(libc::EINVAL);
             return;
@@ -76,14 +91,14 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let nid = match self.ef.lookup_at(dnid, name) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -100,20 +115,21 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         if let Some(fh) = fh {
             assert_eq!(nid, fh);
         }
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
         reply.attr(&TTL, &stat2attr(&st));
     }
 
+    #[allow(clippy::too_many_lines)]
     fn setattr(
         &mut self,
         req: &fuser::Request<'_>,
@@ -175,14 +191,14 @@ impl fuser::Filesystem for crate::ExfatFuse {
         } else {
             log::debug!("nid {nid}");
         }
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         if let Some(fh) = fh {
             assert_eq!(nid, fh);
         }
         let mut st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -217,12 +233,12 @@ impl fuser::Filesystem for crate::ExfatFuse {
                     // ignore this error
                 }
                 get_node_mut!(self.ef, nid).put();
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
             if let Err(e) = self.ef.flush_node(nid) {
                 get_node_mut!(self.ef, nid).put();
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
             get_node_mut!(self.ef, nid).put();
@@ -230,13 +246,13 @@ impl fuser::Filesystem for crate::ExfatFuse {
             st = match self.ef.stat(nid) {
                 Ok(v) => v,
                 Err(e) => {
-                    reply.error(e as i32);
+                    reply.error(e2i(e));
                     return;
                 }
             };
             st.st_size = size;
         }
-        let mut attr = util::stat2attr(&st);
+        let mut attr = crate::util::stat2attr(&st);
         if let Some(atime) = atime {
             attr.atime = match atime {
                 fuser::TimeOrNow::SpecificTime(v) => v,
@@ -271,7 +287,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?} mode {mode:#o} umask {umask:#o} rdev {rdev}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(name) = name.to_str() else {
             reply.error(libc::EINVAL);
             return;
@@ -279,14 +295,14 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let nid = match self.ef.mknod_at(dnid, name) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -304,7 +320,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?} mode {mode:#o} umask {umask:#o}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(name) = name.to_str() else {
             reply.error(libc::EINVAL);
             return;
@@ -312,14 +328,14 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let nid = match self.ef.mkdir_at(dnid, name) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -335,7 +351,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(name) = name.to_str() else {
             reply.error(libc::EINVAL);
             return;
@@ -343,7 +359,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let nid = match self.ef.lookup_at(dnid, name) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -351,7 +367,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             if let Some(node) = self.ef.get_node_mut(nid) {
                 node.put();
             }
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         reply.ok();
@@ -366,7 +382,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} name {name:?}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(name) = name.to_str() else {
             reply.error(libc::EINVAL);
             return;
@@ -374,7 +390,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let nid = match self.ef.lookup_at(dnid, name) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -382,7 +398,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             if let Some(node) = self.ef.get_node_mut(nid) {
                 node.put();
             }
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         reply.ok();
@@ -403,7 +419,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             "old_dnid {old_dnid} old_name {old_name:?} \
             new_dnid {new_dnid} new_name {new_name:?} flags {flags:#x}"
         );
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(old_name) = old_name.to_str() else {
             reply.error(libc::EINVAL);
             return;
@@ -413,7 +429,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             return;
         };
         if let Err(e) = self.ef.rename_at(old_dnid, old_name, new_dnid, new_name) {
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         reply.ok();
@@ -422,7 +438,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     fn open(&mut self, req: &fuser::Request<'_>, nid: u64, flags: i32, reply: fuser::ReplyOpen) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} flags {flags:#x}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(node) = self.ef.get_node(nid) else {
             reply.error(libc::ENOENT);
             return;
@@ -435,7 +451,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         // are available in flags.".
         if (flags & libc::O_TRUNC) != 0 {
             if let Err(e) = self.ef.truncate(nid, 0, true) {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         }
@@ -459,13 +475,13 @@ impl fuser::Filesystem for crate::ExfatFuse {
             "nid {nid} fh {fh} offset {offset} size {size} flags {flags:#x} \
             lock_owner {lock_owner:?}"
         );
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(nid, fh);
         let mut buf = vec![0; size.try_into().unwrap()];
         let bytes = match self.ef.pread(nid, &mut buf, offset.try_into().unwrap()) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -490,12 +506,12 @@ impl fuser::Filesystem for crate::ExfatFuse {
             flags {flags:#x} lock_owner {lock_owner:?}",
             data.len()
         );
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(nid, fh);
         let bytes = match self.ef.pwrite(nid, data, offset.try_into().unwrap()) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -512,10 +528,10 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} fh {fh} lock_owner {lock_owner:?}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(nid, fh);
         if let Err(e) = self.ef.flush_node(nid) {
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         reply.ok();
@@ -536,10 +552,10 @@ impl fuser::Filesystem for crate::ExfatFuse {
             "nid {nid} fh {fh} flags {flags:#x} flush {flush} \
             lock_owner {lock_owner:?}"
         );
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(nid, fh);
         if let Err(e) = self.ef.flush_node(nid) {
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         assert!(self.total_open > 0);
@@ -558,19 +574,19 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} fh {fh} datasync {datasync}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(nid, fh);
         if let Err(e) = self.ef.flush_nodes() {
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         if let Err(e) = self.ef.flush() {
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         // libexfat's fsync is to fsync device fd, not to fsync this nid...
         if let Err(e) = self.ef.fsync() {
-            reply.error(e as i32);
+            reply.error(e2i(e));
             return;
         }
         reply.ok();
@@ -579,7 +595,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     fn opendir(&mut self, req: &fuser::Request<'_>, nid: u64, flags: i32, reply: fuser::ReplyOpen) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} flags {flags:#x}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(node) = self.ef.get_node(nid) else {
             reply.error(libc::ENOENT);
             return;
@@ -600,7 +616,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("dnid {dnid} fh {fh} offset {offset}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(dnid, fh);
         let Some(dnode) = self.ef.get_node(dnid) else {
             reply.error(libc::ENOENT);
@@ -630,7 +646,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let mut c = match self.ef.opendir_cursor(dnid) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -638,10 +654,14 @@ impl fuser::Filesystem for crate::ExfatFuse {
         loop {
             let nid = match self.ef.readdir_cursor(&mut c) {
                 Ok(v) => v,
-                Err(nix::errno::Errno::ENOENT) => break,
                 Err(e) => {
+                    if let libexfat::Error::Errno(e) = e {
+                        if e == nix::errno::Errno::ENOENT {
+                            break;
+                        }
+                    }
                     self.ef.closedir_cursor(c);
-                    reply.error(e as i32);
+                    reply.error(e2i(e));
                     return;
                 }
             };
@@ -652,14 +672,14 @@ impl fuser::Filesystem for crate::ExfatFuse {
                     Err(e) => {
                         get_node_mut!(self.ef, nid).put();
                         self.ef.closedir_cursor(c);
-                        reply.error(e as i32);
+                        reply.error(e2i(e));
                         return;
                     }
                 };
                 if reply.add(
                     st.st_ino,
                     next,
-                    util::mode2kind(st.st_mode),
+                    crate::util::mode2kind(st.st_mode),
                     node.get_name(),
                 ) {
                     get_node_mut!(self.ef, nid).put();
@@ -684,7 +704,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     ) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} fh {fh} flags {flags:#x}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         assert_eq!(nid, fh);
         assert!(self.total_open > 0);
         self.total_open -= 1;
@@ -708,7 +728,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     fn statfs(&mut self, req: &fuser::Request<'_>, nid: u64, reply: fuser::ReplyStatfs) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let sfs = self.ef.statfs();
         reply.statfs(
             sfs.f_blocks,
@@ -727,7 +747,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
     fn access(&mut self, req: &fuser::Request<'_>, nid: u64, mask: i32, reply: fuser::ReplyEmpty) {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid} mask {mask:#o}");
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         reply.ok();
         panic!("access");
     }
@@ -747,7 +767,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             "dnid {dnid} name {name:?} mode {mode:#o} umask {umask:#o} \
             flags {flags:#x}"
         );
-        let _mtx = MTX.lock().unwrap();
+        let _mtx = mtx_lock!(MTX);
         let Some(name) = name.to_str() else {
             reply.error(libc::EINVAL);
             return;
@@ -755,7 +775,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let nid = match self.ef.mknod_at(dnid, name) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -763,7 +783,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
-                reply.error(e as i32);
+                reply.error(e2i(e));
                 return;
             }
         };
@@ -788,9 +808,9 @@ impl fuser::Filesystem for crate::ExfatFuse {
             "nid {nid} fh {fh} flags {flags:#x} cmd {cmd:#x} in_data {in_data:?} \
             out_size {out_size}"
         );
-        let _mtx = MTX.lock().unwrap();
-        if u64::from(cmd) == libexfat::ctl::EXFAT_CTL_NIDPRUNE_ENCODE {
-            log::debug!("EXFAT_CTL_NIDPRUNE");
+        let _mtx = mtx_lock!(MTX);
+        if u64::from(cmd) == libexfat::ctl::CTL_NIDPRUNE_ENCODE {
+            log::debug!("CTL_NIDPRUNE");
             assert!(self.total_open > 0); // fd for this nid
             let x = self.total_open - 1;
             if x > 0 {
@@ -801,7 +821,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             let t = match self.ef.prune_node(nid) {
                 Ok(v) => v,
                 Err(e) => {
-                    reply.error(e as i32);
+                    reply.error(e2i(e));
                     return;
                 }
             };

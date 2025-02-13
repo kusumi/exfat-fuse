@@ -1,9 +1,9 @@
-exfat-fuse ([v0.3.0](https://github.com/kusumi/exfat-fuse/releases/tag/v0.3.0))
+exfat-fuse ([v0.4.0](https://github.com/kusumi/exfat-fuse/releases/tag/v0.4.0))
 ========
 
 ## About
 
-Rust version of [https://github.com/relan/exfat/tree/master/fuse](https://github.com/relan/exfat/tree/master/fuse)
+Rust fork of [https://github.com/relan/exfat/tree/master/fuse](https://github.com/relan/exfat/tree/master/fuse)
 
 ## Supported platforms
 
@@ -11,7 +11,7 @@ Linux / FreeBSD
 
 ## Requirements
 
-Rust 1.81.0 or newer
+Rust 1.84.0 or newer
 
 ## Build
 
