@@ -50,12 +50,10 @@ pub(crate) fn stat2attr(st: &libexfat::exfat::Stat) -> fuser::FileAttr {
 }
 
 pub(crate) fn mode2kind(mode: libexfat::exfat::StatMode) -> fuser::FileType {
-    if (mode & libc::S_IFDIR) != 0 {
-        fuser::FileType::Directory
-    } else if (mode & libc::S_IFREG) != 0 {
-        fuser::FileType::RegularFile
-    } else {
-        panic!("{mode:o}");
+    match mode & libc::S_IFMT {
+        libc::S_IFDIR => fuser::FileType::Directory,
+        libc::S_IFREG => fuser::FileType::RegularFile,
+        _ => panic!("{mode:o}"),
     }
 }
 

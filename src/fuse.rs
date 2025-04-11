@@ -22,9 +22,8 @@ macro_rules! debug_req {
 
 // libexfat (both relan/exfat and Rust) isn't thread-safe.
 // relan/exfat uses libfuse in single-thread mode (-s option).
-lazy_static! {
-    static ref MTX: std::sync::Mutex<i32> = std::sync::Mutex::new(0);
-}
+static MTX: std::sync::LazyLock<std::sync::Mutex<i32>> =
+    std::sync::LazyLock::new(|| std::sync::Mutex::new(0));
 
 macro_rules! mtx_lock {
     ($mtx:expr) => {
@@ -98,6 +97,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         let st = match self.ef.stat(nid) {
             Ok(v) => v,
             Err(e) => {
+                get_node_mut!(self.ef, nid).put();
                 reply.error(e2i(e));
                 return;
             }
@@ -129,6 +129,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         reply.attr(&TTL, &stat2attr(&st));
     }
 
+    #[allow(clippy::similar_names)]
     #[allow(clippy::too_many_lines)]
     fn setattr(
         &mut self,
@@ -241,15 +242,16 @@ impl fuser::Filesystem for crate::ExfatFuse {
                 reply.error(e2i(e));
                 return;
             }
-            get_node_mut!(self.ef, nid).put();
             // truncate has updated mtime
             st = match self.ef.stat(nid) {
                 Ok(v) => v,
                 Err(e) => {
+                    get_node_mut!(self.ef, nid).put();
                     reply.error(e2i(e));
                     return;
                 }
             };
+            get_node_mut!(self.ef, nid).put();
             st.st_size = size;
         }
         let mut attr = crate::util::stat2attr(&st);
@@ -456,7 +458,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             }
         }
         self.total_open += 1;
-        reply.opened(nid, 0);
+        reply.opened(nid, fuser::consts::FOPEN_KEEP_CACHE);
     }
 
     fn read(
@@ -603,7 +605,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
         assert_eq!(node.get_nid(), nid);
         get_node_mut!(self.ef, nid).get(); // put on releasedir
         self.total_open += 1;
-        reply.opened(nid, 0);
+        reply.opened(nid, fuser::consts::FOPEN_KEEP_CACHE);
     }
 
     fn readdir(
@@ -809,6 +811,7 @@ impl fuser::Filesystem for crate::ExfatFuse {
             out_size {out_size}"
         );
         let _mtx = mtx_lock!(MTX);
+        assert_eq!(nid, fh);
         if u64::from(cmd) == libexfat::ctl::CTL_NIDPRUNE_ENCODE {
             log::debug!("CTL_NIDPRUNE");
             assert!(self.total_open > 0); // fd for this nid
