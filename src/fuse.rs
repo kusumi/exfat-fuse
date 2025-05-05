@@ -43,7 +43,7 @@ fn stat2attr(st: &libexfat::exfat::Stat) -> fuser::FileAttr {
 fn e2i(e: libexfat::Error) -> i32 {
     (match e {
         libexfat::Error::Errno(e) => e,
-        libexfat::Error::Error(e) => match crate::util::error2errno(&e) {
+        libexfat::Error::Error(e) => match libfs::os::error2errno(&e) {
             Some(v) => v,
             None => nix::errno::Errno::EINVAL,
         },
@@ -731,17 +731,19 @@ impl fuser::Filesystem for crate::ExfatFuse {
         debug_req!(req, self.debug > 1);
         log::debug!("nid {nid}");
         let _mtx = mtx_lock!(MTX);
-        let sfs = self.ef.statfs();
-        reply.statfs(
-            sfs.f_blocks,
-            sfs.f_bfree,
-            sfs.f_bavail,
-            sfs.f_files,
-            sfs.f_ffree,
-            sfs.f_bsize,
-            sfs.f_namelen,
-            sfs.f_frsize,
-        );
+        match self.ef.statfs() {
+            Ok(v) => reply.statfs(
+                v.f_blocks,
+                v.f_bfree,
+                v.f_bavail,
+                v.f_files,
+                v.f_ffree,
+                v.f_bsize,
+                v.f_namelen,
+                v.f_frsize,
+            ),
+            Err(e) => reply.error(e2i(e)),
+        }
     }
 
     // https://docs.rs/fuser/latest/fuser/trait.Filesystem.html

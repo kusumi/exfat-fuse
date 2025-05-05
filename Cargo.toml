@@ -1,6 +1,6 @@
 [package]
 name = "exfat-fuse"
-version = "0.4.1"
+version = "0.4.2"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
@@ -12,13 +12,13 @@ env_logger = "0.11.3"
 fuser = { version = "0.15.0", features = ["abi-7-18"] }
 getopts = "0.2.21"
 home = "0.5.9"
-lazy_static = "1.4.0"
 libc = "0.2.155"
 libexfat = { git = "https://github.com/kusumi/libexfat" }
+libfs = { git = "https://github.com/kusumi/libfs" }
 log = "0.4.21"
 nix = "0.29.0"
 simplelog = "0.12.2"
 syslog = "7.0.0"
 
 [features]
-bitmap_u64 = ["libexfat/bitmap_u64"]
+bitmap_u64 = ["libfs/bitmap_u64"]

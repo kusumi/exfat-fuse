@@ -30,7 +30,7 @@ impl ExfatFuse {
 fn init_std_logger() -> std::result::Result<(), log::SetLoggerError> {
     let env = env_logger::Env::default().filter_or(
         "RUST_LOG",
-        if util::is_debug_set() {
+        if libfs::is_debug_set() {
             "trace"
         } else {
             "info"
@@ -43,25 +43,24 @@ fn init_file_logger(prog: &str) -> Result<()> {
     let dir = util::get_home_path()?;
     let name = format!(
         ".{}.log",
-        match util::get_basename(prog) {
+        match libfs::fs::get_base_name(prog) {
             Some(v) => v,
             None => "exfat-fuse".to_string(),
         }
     );
     let f = match std::env::var(EXFAT_HOME) {
-        Ok(v) => {
-            if util::is_dir(&v) {
-                util::join_path(&v, &name)?
-            } else {
-                eprintln!("{EXFAT_HOME} not a directory, using {dir} instead");
-                util::join_path(&dir, &name)?
-            }
+        Ok(v) => if libfs::fs::is_dir(&v) {
+            libfs::fs::join_path(&v, &name)
+        } else {
+            eprintln!("{EXFAT_HOME} not a directory, using {dir} instead");
+            libfs::fs::join_path(&dir, &name)
         }
+        .ok_or(nix::errno::Errno::EINVAL)?,
         Err(_) => return Err(Box::new(nix::errno::Errno::ENOENT)),
     };
     Ok(simplelog::CombinedLogger::init(vec![
         simplelog::WriteLogger::new(
-            if util::is_debug_set() {
+            if libfs::is_debug_set() {
                 simplelog::LevelFilter::Trace
             } else {
                 simplelog::LevelFilter::Info
@@ -76,7 +75,7 @@ fn init_syslog_logger(prog: &str) -> Result<()> {
     let formatter = syslog::Formatter3164 {
         facility: syslog::Facility::LOG_USER,
         hostname: None,
-        process: match util::get_basename(prog) {
+        process: match libfs::fs::get_base_name(prog) {
             Some(v) => v,
             None => "exfat-fuse".to_string(),
         },
@@ -85,7 +84,7 @@ fn init_syslog_logger(prog: &str) -> Result<()> {
     let logger = syslog::unix(formatter)?;
     Ok(
         log::set_boxed_logger(Box::new(syslog::BasicLogger::new(logger))).map(|()| {
-            log::set_max_level(if util::is_debug_set() {
+            log::set_max_level(if libfs::is_debug_set() {
                 //log::LevelFilter::Trace // XXX not traced
                 log::LevelFilter::Info
             } else {
@@ -131,7 +130,7 @@ fn main() {
     gopt.optflag("", "ro", "Read-only filesystem");
     gopt.optflag("", "noexec", "Dont allow execution of binaries.");
     gopt.optflag("", "noatime", "Dont update inode access time.");
-    if libexfat::util::is_linux() {
+    if libfs::os::is_linux() {
         gopt.optflag(
             "",
             "auto_unmount",
@@ -241,7 +240,7 @@ fn main() {
     } else {
         fopt.push(fuser::MountOption::Exec);
     }
-    if libexfat::util::is_linux() {
+    if libfs::os::is_linux() {
         if matches.opt_present("auto_unmount") {
             fopt.push(fuser::MountOption::AutoUnmount);
         }
@@ -294,7 +293,7 @@ fn main() {
     }
     let use_daemon = !matches.opt_present("d"); // not debug
 
-    if util::is_debug_set() {
+    if libfs::is_debug_set() {
         mopt.push("--debug");
     }
 
@@ -354,7 +353,7 @@ fn main() {
     }
     // fuser::mount2 doesn't return, hence after daemonize
     // XXX use fuser::spawn_mount2
-    if let Err(e) = fuser::mount2(ExfatFuse::new(ef, util::get_debug_level()), mntpt, &fopt) {
+    if let Err(e) = fuser::mount2(ExfatFuse::new(ef, libfs::get_debug_level()), mntpt, &fopt) {
         log::error!("{e}");
         std::process::exit(1);
     }
